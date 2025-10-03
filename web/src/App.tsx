@@ -67,6 +67,7 @@ export default function App() {
     const [wizardError, setWizardError] = useState<string | null>(null);
     const [wizardLoading, setWizardLoading] = useState(false);
     const [wizardFinalJson, setWizardFinalJson] = useState<any | null>(null);
+    const [showIntro, setShowIntro] = useState(true);
 
     const validate = useCallback((key: QuestionKey, value: string): string | null => {
         switch (key) {
@@ -100,7 +101,17 @@ export default function App() {
 
     const goBack = useCallback(() => {
         setWizardError(null);
+        if (currentStep === 0) {
+            setShowIntro(true);
+            return;
+        }
         setCurrentStep((s) => Math.max(0, s - 1));
+    }, [currentStep]);
+
+    const startWizard = useCallback(() => {
+        setWizardError(null);
+        setShowIntro(false);
+        setCurrentStep(0);
     }, []);
 
     const submitIntake = useCallback(async () => {
@@ -212,10 +223,11 @@ export default function App() {
     );
 
     const totalSteps = questions.length;
-    const isReviewStep = currentStep >= totalSteps;
-    const currentQuestion = !isReviewStep ? questions[currentStep] : null;
+    const isReviewStep = !showIntro && currentStep >= totalSteps;
+    const isQuestionStep = !showIntro && !isReviewStep;
+    const currentQuestion = isQuestionStep ? questions[currentStep] : null;
     useEffect(() => {
-        if (isReviewStep || !currentQuestion?.title) {
+        if (showIntro || isReviewStep || !currentQuestion?.title) {
             questionAudioRef.current?.pause();
             questionAudioRef.current = null;
             return;
@@ -253,7 +265,7 @@ export default function App() {
             questionAudioRef.current?.pause();
             questionAudioRef.current = null;
         };
-    }, [isReviewStep, currentQuestion?.title]);
+    }, [showIntro, isReviewStep, currentQuestion?.title]);
 
     if (totalSteps === 0) {
         return (
@@ -331,7 +343,24 @@ export default function App() {
                 <div className="govuk-grid-row minWidth960">
                     <div className="govuk-grid-column-two-thirds">
                         <section className="govuk-!-margin-bottom-7">
-                            {!isReviewStep ? (
+                            {showIntro ? (
+                                <>
+                                    <h1 className="govuk-heading-l">Welcome to the Visit Visa assistant</h1>
+                                    <p className="govuk-body">Use this service to prepare the key information for your Standard Visitor visa request.</p>
+                                    <p className="govuk-body">Before you start, make sure you have:</p>
+                                    <ul className="govuk-list govuk-list--bullet">
+                                        <li>your full legal name and date of birth</li>
+                                        <li>the nationality shown on your passport</li>
+                                        <li>a valid passport number</li>
+                                    </ul>
+                                    <div className="govuk-inset-text">We will collect these details and share them with the visa bot so it can guide you through the next steps.</div>
+                                    <div className="govuk-button-group">
+                                        <button type="button" className="govuk-button" onClick={startWizard}>
+                                            Start now
+                                        </button>
+                                    </div>
+                                </>
+                            ) : !isReviewStep ? (
                                 <>
 
 
@@ -362,13 +391,13 @@ export default function App() {
                                     {wizardErrorSummary}
 
                                     <div className="govuk-button-group">
-                                        {currentStep > 0 && (
+                                        {(currentStep > 0 || !showIntro) && (
                                             <button
                                                 type="button"
                                                 className="govuk-button govuk-button--secondary"
                                                 onClick={goBack}
                                             >
-                                                Back
+                                                {currentStep === 0 ? "Back to introduction" : "Back"}
                                             </button>
                                         )}
                                         <button type="button" className="govuk-button" onClick={goNext}>
