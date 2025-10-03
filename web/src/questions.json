@@ -1,0 +1,36 @@
+{
+  "questions": [
+    {
+      "key": "full_name",
+      "title": "What is your name?",
+      "hint": "Enter your full legal name.",
+      "placeholder": "Jane Mary Doe",
+      "type": "text",
+      "order": 1
+    },
+    {
+      "key": "dob",
+      "title": "Date of birth",
+      "hint": "Use the format YYYY-MM-DD.",
+      "placeholder": "1991-04-12",
+      "type": "date",
+      "order": 2
+    },
+    {
+      "key": "nationality",
+      "title": "Nationality",
+      "hint": "Enter your country of citizenship.",
+      "placeholder": "United Kingdom",
+      "type": "text",
+      "order": 3
+    },
+    {
+      "key": "passport_number",
+      "title": "Passport number",
+      "hint": "Include all letters and digits.",
+      "placeholder": "AB1234567",
+      "type": "text",
+      "order": 4
+    }
+  ]
+}

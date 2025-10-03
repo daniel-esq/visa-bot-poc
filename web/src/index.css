@@ -1,0 +1,25 @@
+:root {
+  font-family: "GDS Transport", Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #0b0c0c;
+  background-color: #f3f2f1;
+}
+
+body {
+  margin: 0;
+  background-color: #f3f2f1;
+  color: #0b0c0c;
+}
+
+a {
+  color: #1d70b8;
+}
+
+a:hover {
+  color: #003078;
+}
