@@ -8,10 +8,26 @@ const API_BASE = "";
 const MCP_WS_URL = import.meta?.env?.VITE_MCP_WS
     ?? `${window.location.protocol === "https:" ? "wss" : "ws"}://${window.location.hostname}:8282/mcp`;
 
+const ASK_TOP_K = 5;
 
-function classNames(...xs: Array<string | false | null | undefined>) {
-    return xs.filter(Boolean).join(" ");
+function formatAskResult(result: any): string {
+    if (!result) return "No response returned.";
+    if (typeof result === "string") return result;
+    if (typeof result.answer === "string") return result.answer;
+    if (Array.isArray(result)) {
+        try {
+            return JSON.stringify(result, null, 2);
+        } catch {
+            return String(result);
+        }
+    }
+    try {
+        return JSON.stringify(result, null, 2);
+    } catch {
+        return String(result);
+    }
 }
+
 
 // persist a user id for this browser (you can replace with your auth user id)
 function getOrCreateUserId(): string {
@@ -37,6 +53,11 @@ export default function App() {
     };
 
     type Answers = Record<QuestionKey, string>;
+    type AskHistoryEntry = {
+        question: string;
+        answer?: string;
+        error?: string;
+    };
 
     const questions = useMemo<QuestionDefinition[]>(() => {
         return [...questionsConfig.questions]
@@ -62,9 +83,13 @@ export default function App() {
     const [answers, setAnswers] = useState<Answers>(initialAnswers);
     const [wizardError, setWizardError] = useState<string | null>(null);
     const [wizardLoading, setWizardLoading] = useState(false);
-    const [wizardFinalJson, setWizardFinalJson] = useState<any | null>(null);
     const [showIntro, setShowIntro] = useState(true);
     const [userId] = useState<string>(() => getOrCreateUserId());
+    const [mode, setMode] = useState<"wizard" | "insights">("wizard");
+    const [askInput, setAskInput] = useState("");
+    const [askHistory, setAskHistory] = useState<AskHistoryEntry[]>([]);
+    const [askLoading, setAskLoading] = useState(false);
+    const [askError, setAskError] = useState<string | null>(null);
 
     const validate = useCallback((key: QuestionKey, value: string): string | null => {
         switch (key) {
@@ -107,13 +132,99 @@ export default function App() {
 
     const startWizard = useCallback(() => {
         setWizardError(null);
+        setMode("wizard");
         setShowIntro(false);
         setCurrentStep(0);
+        setAskHistory([]);
+        setAskInput("");
+        setAskError(null);
+    }, []);
+
+    const withMcp = useCallback(async <T,>(
+        runner: (helpers: {
+            send: (message: any) => void;
+            waitForResponse: (id: number, timeoutMs?: number) => Promise<any>;
+            ws: WebSocket;
+        }) => Promise<T>
+    ): Promise<T> => {
+        const ws = new WebSocket(MCP_WS_URL);
+        const cleanup = () => {
+            try {
+                ws.close();
+            } catch {
+                /* ignore close errors */
+            }
+        };
+
+        try {
+            await new Promise<void>((resolve, reject) => {
+                let timeoutHandle: number;
+                const onOpen = () => {
+                    window.clearTimeout(timeoutHandle);
+                    ws.removeEventListener("error", onError);
+                    ws.removeEventListener("open", onOpen);
+                    resolve();
+                };
+                const onError = () => {
+                    window.clearTimeout(timeoutHandle);
+                    ws.removeEventListener("open", onOpen);
+                    ws.removeEventListener("error", onError);
+                    reject(new Error("MCP connection error"));
+                };
+                ws.addEventListener("open", onOpen);
+                ws.addEventListener("error", onError);
+                timeoutHandle = window.setTimeout(() => {
+                    ws.removeEventListener("open", onOpen);
+                    ws.removeEventListener("error", onError);
+                    reject(new Error("MCP connection timeout"));
+                }, 8000);
+            });
+
+            const waitForResponse = (id: number, timeoutMs = 20000) =>
+                new Promise<any>((resolve, reject) => {
+                    let timeoutHandle: number;
+                    const onMessage = (event: MessageEvent) => {
+                        try {
+                            const msg = JSON.parse(event.data as string);
+                            if (msg?.jsonrpc !== "2.0" || msg?.id !== id) {
+                                return;
+                            }
+                            window.clearTimeout(timeoutHandle);
+                            ws.removeEventListener("message", onMessage);
+                            if (msg.error) {
+                                reject(new Error(msg.error?.message || "MCP error"));
+                            } else {
+                                resolve(msg.result);
+                            }
+                        } catch {
+                            // ignore parse errors
+                        }
+                    };
+                    ws.addEventListener("message", onMessage);
+                    timeoutHandle = window.setTimeout(() => {
+                        ws.removeEventListener("message", onMessage);
+                        reject(new Error(`MCP timeout waiting for response to id=${id}`));
+                    }, timeoutMs);
+                });
+
+            const send = (message: any) => {
+                ws.send(JSON.stringify({ jsonrpc: "2.0", ...message }));
+            };
+
+            send({ id: 1, method: "initialize", params: {} });
+            await waitForResponse(1);
+
+            const result = await runner({ send, waitForResponse, ws });
+            cleanup();
+            return result;
+        } catch (err) {
+            cleanup();
+            throw err;
+        }
     }, []);
 
     const submitIntake = useCallback(async () => {
         setWizardError(null);
-        setWizardFinalJson(null);
 
         // Validate locally first
         for (const q of questions) {
@@ -134,69 +245,92 @@ export default function App() {
 
         setWizardLoading(true);
 
-        // Simple JSON-RPC helpers
-        const waitForResponse = (ws: WebSocket, id: number, timeoutMs = 20000) =>
-            new Promise<any>((resolve, reject) => {
-                const to = setTimeout(() => {
-                    ws.removeEventListener("message", onMsg);
-                    reject(new Error(`MCP timeout waiting for response to id=${id}`));
-                }, timeoutMs);
-
-                function onMsg(ev: MessageEvent) {
-                    try {
-                        const msg = JSON.parse(ev.data);
-                        if (msg?.jsonrpc !== "2.0") return;
-                        if (msg?.id !== id) return;
-                        clearTimeout(to);
-                        ws.removeEventListener("message", onMsg);
-                        if (msg.error) reject(new Error(msg.error?.message || "MCP error"));
-                        else resolve(msg.result);
-                    } catch (e) {
-                        // ignore non-JSON lines
-                    }
-                }
-                ws.addEventListener("message", onMsg);
-            });
-
-        const send = (ws: WebSocket, obj: any) => ws.send(JSON.stringify({ jsonrpc: "2.0", ...obj }));
-
         try {
-            const ws = new WebSocket(MCP_WS_URL);
-
-            // Wait for socket open
-            await new Promise<void>((resolve, reject) => {
-                const to = setTimeout(() => reject(new Error("MCP connection timeout")), 8000);
-                ws.onopen = () => { clearTimeout(to); resolve(); };
-                ws.onerror = (e) => { clearTimeout(to); reject(new Error("MCP connection error")); };
-            });
-
-            // 1) initialize
-            send(ws, { id: 1, method: "initialize", params: {} });
-            await waitForResponse(ws, 1);
-
-            // 2) tools/call -> save_visa_embedding
-            send(ws, {
-                id: 2,
-                method: "tools/call",
-                params: {
-                    name: "save_visa_embedding",
-                    arguments: {
-                        userId,
-                        answers: answersObj, // IMPORTANT: object, not JSON string
+            await withMcp(async ({ send, waitForResponse }) => {
+                send({
+                    id: 2,
+                    method: "tools/call",
+                    params: {
+                        name: "save_visa_embedding",
+                        arguments: {
+                            userId,
+                            answers: answersObj, // IMPORTANT: object, not JSON string
+                        },
                     },
-                },
+                });
+
+                await waitForResponse(2);
+                return null;
             });
 
-            const result = await waitForResponse(ws, 2);
-            // Example result: { id: "<uuid>", status: "SAVED", savedAt: "..." }
-            setWizardFinalJson(result);
-            ws.close();
+            setMode("insights");
+            setAskHistory([]);
+            setAskInput("");
+            setAskError(null);
         } catch (e: any) {
             setWizardError(e?.message || "Submission error");
         } finally {
             setWizardLoading(false);
         }
-    }, [answers, questions, validate, userId]);
+    }, [answers, questions, validate, userId, withMcp]);
+
+    const askQuestion = useCallback(async () => {
+        const trimmed = askInput.trim();
+        if (!trimmed) {
+            setAskError("Please enter a question before submitting.");
+            return;
+        }
+
+        setAskError(null);
+        setAskLoading(true);
+
+        try {
+            const result = await withMcp(async ({ send, waitForResponse }) => {
+                send({
+                    id: 2,
+                    method: "tools/call",
+                    params: {
+                        name: "ask_visa",
+                        arguments: {
+                            query: trimmed,
+                            k: ASK_TOP_K,
+                        },
+                    },
+                });
+
+                return waitForResponse(2);
+            });
+
+            const answerText = formatAskResult(result);
+            setAskHistory((prev) => [...prev, { question: trimmed, answer: answerText }]);
+            setAskInput("");
+        } catch (e: any) {
+            const message = e?.message || "Unable to ask question.";
+            setAskHistory((prev) => [...prev, { question: trimmed, error: message }]);
+            setAskError(message);
+        } finally {
+            setAskLoading(false);
+        }
+    }, [askInput, withMcp]);
+
+    const returnToReview = useCallback(() => {
+        setMode("wizard");
+        setShowIntro(false);
+        setWizardError(null);
+        setCurrentStep(questions.length);
+    }, [questions.length]);
+
+    const restartSubmission = useCallback(() => {
+        setMode("wizard");
+        setShowIntro(true);
+        setWizardError(null);
+        setCurrentStep(0);
+        setAnswers({ ...initialAnswers });
+        setAskHistory([]);
+        setAskInput("");
+        setAskError(null);
+        setAskLoading(false);
+    }, [initialAnswers]);
 
 
     const questionAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -271,6 +405,22 @@ export default function App() {
         </div>
     ) : null;
 
+    const askErrorSummary = askError ? (
+        <div
+            className="govuk-error-summary"
+            aria-labelledby="ask-error-title"
+            role="alert"
+            tabIndex={-1}
+        >
+            <h2 className="govuk-error-summary__title" id="ask-error-title">
+                There is a problem
+            </h2>
+            <div className="govuk-error-summary__body">
+                <p className="govuk-error-message">{askError}</p>
+            </div>
+        </div>
+    ) : null;
+
     return (
         <div className="app-page">
 
@@ -322,110 +472,186 @@ export default function App() {
                 <div className="govuk-grid-row minWidth960">
                     <div className="govuk-grid-column-two-thirds">
                         <section className="govuk-!-margin-bottom-7">
-                            {showIntro ? (
-                                <>
-                                    <h1 className="govuk-heading-l">Welcome to the Visit Visa assistant</h1>
-                                    <p className="govuk-body">Use this service to prepare the key information for your Standard Visitor visa request.</p>
-                                    <p className="govuk-body">Before you start, make sure you have:</p>
-                                    <ul className="govuk-list govuk-list--bullet">
-                                        <li>your full legal name and date of birth</li>
-                                        <li>the nationality shown on your passport</li>
-                                        <li>a valid passport number</li>
-                                    </ul>
-                                    <div className="govuk-inset-text">We will collect these details and share them with the visa bot so it can guide you through the next steps.</div>
-                                    <div className="govuk-button-group">
-                                        <button type="button" className="govuk-button" onClick={startWizard}>
-                                            Start now
-                                        </button>
-                                    </div>
-                                </>
-                            ) : !isReviewStep ? (
-                                <>
-
-
-                                    <div className="govuk-form-group govuk-!-margin-bottom-4">
-                                        <label className="govuk-label govuk-label--m" htmlFor="wizard-input">
-                                            {currentQuestion?.title}
-                                        </label>
-                                        {currentQuestion?.hint && <div className="govuk-hint">{currentQuestion.hint}</div>}
-                                        <input
-                                            id="wizard-input"
-                                            className="govuk-input"
-                                            type={currentQuestion?.type}
-                                            value={currentQuestion ? answers[currentQuestion.key] : ""}
-                                            placeholder={currentQuestion?.placeholder}
-                                            onChange={(e) =>
-                                                currentQuestion &&
-                                                setAnswers((a) => ({ ...a, [currentQuestion.key]: e.target.value }))
-                                            }
-                                            onKeyDown={(e) => {
-                                                if (e.key === "Enter") {
-                                                    e.preventDefault();
-                                                    goNext();
+                            {mode === "wizard" ? (
+                                showIntro ? (
+                                    <>
+                                        <h1 className="govuk-heading-l">Welcome to the Visit Visa assistant</h1>
+                                        <p className="govuk-body">Use this service to prepare the key information for your Standard Visitor visa request.</p>
+                                        <p className="govuk-body">Before you start, make sure you have:</p>
+                                        <ul className="govuk-list govuk-list--bullet">
+                                            <li>your full legal name and date of birth</li>
+                                            <li>the nationality shown on your passport</li>
+                                            <li>a valid passport number</li>
+                                        </ul>
+                                        <div className="govuk-inset-text">We will collect these details and share them with the visa bot so it can guide you through the next steps.</div>
+                                        <div className="govuk-button-group">
+                                            <button type="button" className="govuk-button" onClick={startWizard}>
+                                                Start now
+                                            </button>
+                                        </div>
+                                    </>
+                                ) : !isReviewStep ? (
+                                    <>
+                                        <div className="govuk-form-group govuk-!-margin-bottom-4">
+                                            <label className="govuk-label govuk-label--m" htmlFor="wizard-input">
+                                                {currentQuestion?.title}
+                                            </label>
+                                            {currentQuestion?.hint && <div className="govuk-hint">{currentQuestion.hint}</div>}
+                                            <input
+                                                id="wizard-input"
+                                                className="govuk-input"
+                                                type={currentQuestion?.type}
+                                                value={currentQuestion ? answers[currentQuestion.key] : ""}
+                                                placeholder={currentQuestion?.placeholder}
+                                                onChange={(e) =>
+                                                    currentQuestion &&
+                                                    setAnswers((a) => ({ ...a, [currentQuestion.key]: e.target.value }))
                                                 }
-                                            }}
-                                        />
-                                    </div>
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Enter") {
+                                                        e.preventDefault();
+                                                        goNext();
+                                                    }
+                                                }}
+                                            />
+                                        </div>
 
-                                    {wizardErrorSummary}
+                                        {wizardErrorSummary}
 
-                                    <div className="govuk-button-group">
-                                        {(currentStep > 0 || !showIntro) && (
+                                        <div className="govuk-button-group">
+                                            {(currentStep > 0 || !showIntro) && (
+                                                <button
+                                                    type="button"
+                                                    className="govuk-button govuk-button--secondary"
+                                                    onClick={goBack}
+                                                >
+                                                    {currentStep === 0 ? "Back to introduction" : "Back"}
+                                                </button>
+                                            )}
+                                            <button type="button" className="govuk-button" onClick={goNext}>
+                                                {currentStep === totalSteps - 1 ? "Review your answers" : "Next question"}
+                                            </button>
+                                        </div>
+
+                                        <p className="govuk-body govuk-!-margin-top-3">
+                                            <strong>Progress:</strong> Step {currentStep + 1} of {totalSteps}
+                                        </p>
+                                    </>
+                                ) : (
+                                    <>
+                                        <h2 className="govuk-heading-l">Review your answers</h2>
+                                        <p className="govuk-body">
+                                            Check the information below before submitting your responses to the visa team.
+                                        </p>
+
+                                        {wizardErrorSummary}
+
+                                        <dl className="govuk-summary-list app-summary-list">
+                                            {questions.map((q) => (
+                                                <div className="govuk-summary-list__row" key={q.key}>
+                                                    <dt className="govuk-summary-list__key">{q.title}</dt>
+                                                    <dd className="govuk-summary-list__value">
+                                                        {answers[q.key] || <span className="govuk-hint">Not provided</span>}
+                                                    </dd>
+                                                </div>
+                                            ))}
+                                        </dl>
+
+                                        <div className="govuk-button-group">
                                             <button
                                                 type="button"
                                                 className="govuk-button govuk-button--secondary"
                                                 onClick={goBack}
                                             >
-                                                {currentStep === 0 ? "Back to introduction" : "Back"}
+                                                Back
                                             </button>
-                                        )}
-                                        <button type="button" className="govuk-button" onClick={goNext}>
-                                            {currentStep === totalSteps - 1 ? "Review your answers" : "Next question"}
-                                        </button>
-                                    </div>
-
-                                    <p className="govuk-body govuk-!-margin-top-3">
-                                        <strong>Progress:</strong> Step {currentStep + 1} of {totalSteps}
-                                    </p>
-                                </>
+                                            <button
+                                                type="button"
+                                                className="govuk-button"
+                                                onClick={submitIntake}
+                                                disabled={wizardLoading}
+                                            >
+                                                {wizardLoading ? "Submitting..." : "Submit responses"}
+                                            </button>
+                                        </div>
+                                    </>
+                                )
                             ) : (
                                 <>
-                                    <h2 className="govuk-heading-l">Review your answers</h2>
+                                    <h1 className="govuk-heading-l">Ask about your submission</h1>
                                     <p className="govuk-body">
-                                        Check the information below before submitting your responses to the visa team.
+                                        Your responses have been saved. Ask the visa assistant questions about the collected details below.
                                     </p>
 
-                                    {wizardErrorSummary}
+                                    {askErrorSummary}
 
-                                    <dl className="govuk-summary-list app-summary-list">
-                                        {questions.map((q) => (
-                                            <div className="govuk-summary-list__row" key={q.key}>
-                                                <dt className="govuk-summary-list__key">{q.title}</dt>
-                                                <dd className="govuk-summary-list__value">
-                                                    {answers[q.key] || <span className="govuk-hint">Not provided</span>}
-                                                </dd>
-                                            </div>
-                                        ))}
-                                    </dl>
+                                    <div className="govuk-form-group">
+                                        <label className="govuk-label govuk-label--m" htmlFor="ask-query">
+                                            Ask a question
+                                        </label>
+                                        <textarea
+                                            id="ask-query"
+                                            className="govuk-textarea"
+                                            rows={4}
+                                            value={askInput}
+                                            placeholder="e.g. What is Jane Doe's passport number?"
+                                            onChange={(e) => setAskInput(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                                                    e.preventDefault();
+                                                    askQuestion();
+                                                }
+                                            }}
+                                        />
+                                        <div className="govuk-hint">Press Ctrl+Enter to send your question.</div>
+                                    </div>
 
                                     <div className="govuk-button-group">
                                         <button
                                             type="button"
-                                            className="govuk-button govuk-button--secondary"
-                                            onClick={goBack}
+                                            className="govuk-button"
+                                            onClick={askQuestion}
+                                            disabled={askLoading}
                                         >
-                                            Back
+                                            {askLoading ? "Asking..." : "Ask question"}
                                         </button>
                                         <button
                                             type="button"
-                                            className="govuk-button"
-                                            onClick={submitIntake}
-                                            disabled={wizardLoading}
+                                            className="govuk-button govuk-button--secondary"
+                                            onClick={returnToReview}
                                         >
-                                            {wizardLoading ? "Submitting..." : "Submit responses"}
+                                            Review responses
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="govuk-button govuk-button--secondary"
+                                            onClick={restartSubmission}
+                                        >
+                                            Start a new submission
                                         </button>
                                     </div>
 
+                                    <div className="govuk-!-margin-top-6">
+                                        <h2 className="govuk-heading-m">Conversation</h2>
+                                        {askHistory.length === 0 ? (
+                                            <p className="govuk-body">
+                                                No questions asked yet. Try asking something like "What is Jane Doe's passport number?".
+                                            </p>
+                                        ) : (
+                                            askHistory.map((entry, index) => (
+                                                <div className="govuk-inset-text" key={index}>
+                                                    <p className="govuk-body">
+                                                        <strong>Q{index + 1}:</strong> {entry.question}
+                                                    </p>
+                                                    {entry.error ? (
+                                                        <p className="govuk-error-message">Error: {entry.error}</p>
+                                                    ) : (
+                                                        <pre className="govuk-body">{entry.answer}</pre>
+                                                    )}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </>
                             )}
                         </section>
@@ -452,18 +678,6 @@ export default function App() {
         </div>
     );
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
