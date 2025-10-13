@@ -14,7 +14,6 @@ import OpenAI from "openai";
  * Endpoints:
  *  - GET  /healthz                 -> "ok" (quick liveness)
  *  - POST /api/chat                -> Structured JSON (schema-validated)
- *  - POST /api/chat/stream         -> SSE stream of messages/final JSON
  */
 
 // ---- OpenAI client & model selection ----
@@ -80,7 +79,7 @@ function extractJsonFromResponse(r: any): unknown {
     return null;
 }
 
-// POST /api/chat — returns JSON validated against VisaIntakeSchema
+// POST /api/chat ï¿½ returns JSON validated against VisaIntakeSchema
 app.post("/api/chat", async (req: Request, res: Response, next: NextFunction) => {
     try {
         const {userMessage} = (req.body || {}) as { userMessage?: string };
@@ -134,71 +133,6 @@ app.post("/api/tts", async (req: Request, res: Response, next: NextFunction) => 
         return next(err);
     }
 });
-// POST /api/chat/stream â€” SSE stream of incremental messages and final JSON
-app.post("/api/chat/stream", async (req: Request, res: Response, next: NextFunction) => {
-    try {
-        const {userMessage} = (req.body || {}) as { userMessage?: string };
-        if (!userMessage || typeof userMessage !== "string") {
-            res.status(400).json({error: "bad_request", message: "userMessage (string) is required"});
-            return;
-        }
-
-        // SSE headers
-        res.setHeader("Content-Type", "text/event-stream");
-        res.setHeader("Cache-Control", "no-cache, no-transform");
-        res.setHeader("Connection", "keep-alive");
-
-        const stream = openai.responses.stream({
-            model: DEFAULT_MODEL,
-            input: [
-                {role: "system", content: "You are a concise visa intake assistant."},
-                {role: "user", content: userMessage}
-            ],
-            text: {
-                format: {
-                    name: "VisaIntake",
-                    type: "json_schema",
-                    schema: VisaIntakeSchema
-                }
-            }
-        });
-
-        // Forward incremental messages as they arrive
-        // @ts-ignore
-        stream.on("message", (msg: unknown) => {
-            console.log("msg" + msg);
-            res.write(`data: ${JSON.stringify({event: "message", payload: msg})}\n\n`);
-        });
-
-        // When the model emits the final structured message
-        // @ts-ignore
-        stream.on("finalMessage", (finalMsg: unknown) => {
-            try {
-                const data = extractJsonFromResponse(finalMsg);
-                console.log("msg" + finalMsg);
-                res.write(`data: ${JSON.stringify({event: "final", data})}\n\n`);
-            } catch {
-                // ignore parse issues, client still got message events
-            }
-        });
-
-        stream.on("end", () => {
-            console.log("Streaming end");
-            res.write(`event: end\n`);
-            res.end();
-        });
-
-        stream.on("error", (err: unknown) => {
-            console.log("Error" + err);
-            console.error("[SSE stream error]", err);
-            res.write(`event: error\n`);
-            res.end();
-        });
-    } catch (err) {
-        return next(err);
-    }
-});
-
 // Basic error handler (avoid leaking details)
 app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     console.error(err);
