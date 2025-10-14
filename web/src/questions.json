@@ -14,7 +14,7 @@
       "hint": "Use the format YYYY-MM-DD.",
       "placeholder": "1991-04-12",
       "type": "date",
-      "order": 2
+      "order": 5
     },
     {
       "key": "nationality",
@@ -38,6 +38,13 @@
       "hint": "Select Yes if your primary residence is currently in the United Kingdom.",
       "type": "radio",
       "order": 5
+    },
+    {
+      "key": "other_name",
+      "title": "Do you have any other names?",
+      "hint": "Select Yes if you have any other names, such as a maiden name",
+      "type": "radio",
+      "order": 2
     }
   ]
 }
