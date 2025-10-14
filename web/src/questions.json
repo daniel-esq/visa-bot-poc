@@ -31,6 +31,13 @@
       "placeholder": "AB1234567",
       "type": "text",
       "order": 4
+    },
+    {
+      "key": "live_in_uk",
+      "title": "Do you live in the UK?",
+      "hint": "Select Yes if your primary residence is currently in the United Kingdom.",
+      "type": "radio",
+      "order": 5
     }
   ]
 }

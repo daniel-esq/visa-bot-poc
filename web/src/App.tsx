@@ -101,6 +101,8 @@ export default function App() {
                 return value.trim() ? null : "Please enter your nationality.";
             case "passport_number":
                 return value.trim().length >= 5 ? null : "Passport number looks too short.";
+            case "live_in_uk":
+                return value === "yes" || value === "no" ? null : "Select yes or no.";
             default:
                 return null;
         }
@@ -493,27 +495,88 @@ export default function App() {
                                 ) : !isReviewStep ? (
                                     <>
                                         <div className="govuk-form-group govuk-!-margin-bottom-4">
-                                            <label className="govuk-label govuk-label--m" htmlFor="wizard-input">
-                                                {currentQuestion?.title}
-                                            </label>
-                                            {currentQuestion?.hint && <div className="govuk-hint">{currentQuestion.hint}</div>}
-                                            <input
-                                                id="wizard-input"
-                                                className="govuk-input"
-                                                type={currentQuestion?.type}
-                                                value={currentQuestion ? answers[currentQuestion.key] : ""}
-                                                placeholder={currentQuestion?.placeholder}
-                                                onChange={(e) =>
-                                                    currentQuestion &&
-                                                    setAnswers((a) => ({ ...a, [currentQuestion.key]: e.target.value }))
-                                                }
-                                                onKeyDown={(e) => {
-                                                    if (e.key === "Enter") {
-                                                        e.preventDefault();
-                                                        goNext();
-                                                    }
-                                                }}
-                                            />
+                                            {currentQuestion?.type === "radio" ? (
+                                                <fieldset className="govuk-fieldset">
+                                                    <legend className="govuk-fieldset__legend govuk-fieldset__legend--m">
+                                                        {currentQuestion?.title}
+                                                    </legend>
+                                                    {currentQuestion?.hint && (
+                                                        <div className="govuk-hint">{currentQuestion.hint}</div>
+                                                    )}
+                                                    <div className="govuk-radios" data-module="govuk-radios">
+                                                        <div className="govuk-radios__item">
+                                                            <input
+                                                                className="govuk-radios__input"
+                                                                id={`${currentQuestion?.key}-yes`}
+                                                                name={currentQuestion?.key}
+                                                                type="radio"
+                                                                value="yes"
+                                                                checked={answers[currentQuestion?.key] === "yes"}
+                                                                onChange={() =>
+                                                                    currentQuestion &&
+                                                                    setAnswers((a) => ({
+                                                                        ...a,
+                                                                        [currentQuestion.key]: "yes",
+                                                                    }))
+                                                                }
+                                                            />
+                                                            <label
+                                                                className="govuk-label govuk-radios__label"
+                                                                htmlFor={`${currentQuestion?.key}-yes`}
+                                                            >
+                                                                Yes
+                                                            </label>
+                                                        </div>
+                                                        <div className="govuk-radios__item">
+                                                            <input
+                                                                className="govuk-radios__input"
+                                                                id={`${currentQuestion?.key}-no`}
+                                                                name={currentQuestion?.key}
+                                                                type="radio"
+                                                                value="no"
+                                                                checked={answers[currentQuestion?.key] === "no"}
+                                                                onChange={() =>
+                                                                    currentQuestion &&
+                                                                    setAnswers((a) => ({
+                                                                        ...a,
+                                                                        [currentQuestion.key]: "no",
+                                                                    }))
+                                                                }
+                                                            />
+                                                            <label
+                                                                className="govuk-label govuk-radios__label"
+                                                                htmlFor={`${currentQuestion?.key}-no`}
+                                                            >
+                                                                No
+                                                            </label>
+                                                        </div>
+                                                    </div>
+                                                </fieldset>
+                                            ) : (
+                                                <>
+                                                    <label className="govuk-label govuk-label--m" htmlFor="wizard-input">
+                                                        {currentQuestion?.title}
+                                                    </label>
+                                                    {currentQuestion?.hint && <div className="govuk-hint">{currentQuestion.hint}</div>}
+                                                    <input
+                                                        id="wizard-input"
+                                                        className="govuk-input"
+                                                        type={currentQuestion?.type}
+                                                        value={currentQuestion ? answers[currentQuestion.key] : ""}
+                                                        placeholder={currentQuestion?.placeholder}
+                                                        onChange={(e) =>
+                                                            currentQuestion &&
+                                                            setAnswers((a) => ({ ...a, [currentQuestion.key]: e.target.value }))
+                                                        }
+                                                        onKeyDown={(e) => {
+                                                            if (e.key === "Enter") {
+                                                                e.preventDefault();
+                                                                goNext();
+                                                            }
+                                                        }}
+                                                    />
+                                                </>
+                                            )}
                                         </div>
 
                                         {wizardErrorSummary}
@@ -578,7 +641,7 @@ export default function App() {
                                 )
                             ) : (
                                 <>
-                                    <h1 className="govuk-heading-l">Ask about your submission</h1>
+                                    <h1 className="govuk-heading-l">Ask a question</h1>
                                     <p className="govuk-body">
                                         Your responses have been saved. Ask the visa assistant questions about the collected details below.
                                     </p>
@@ -586,9 +649,6 @@ export default function App() {
                                     {askErrorSummary}
 
                                     <div className="govuk-form-group">
-                                        <label className="govuk-label govuk-label--m" htmlFor="ask-query">
-                                            Ask a question
-                                        </label>
                                         <textarea
                                             id="ask-query"
                                             className="govuk-textarea"
@@ -603,7 +663,7 @@ export default function App() {
                                                 }
                                             }}
                                         />
-                                        <div className="govuk-hint">Press Ctrl+Enter to send your question.</div>
+                                        <div className="govuk-hint">Try asking something like "What is Jane Doe's passport number?".</div>
                                     </div>
 
                                     <div className="govuk-button-group">
@@ -615,27 +675,13 @@ export default function App() {
                                         >
                                             {askLoading ? "Asking..." : "Ask question"}
                                         </button>
-                                        <button
-                                            type="button"
-                                            className="govuk-button govuk-button--secondary"
-                                            onClick={returnToReview}
-                                        >
-                                            Review responses
-                                        </button>
-                                        <button
-                                            type="button"
-                                            className="govuk-button govuk-button--secondary"
-                                            onClick={restartSubmission}
-                                        >
-                                            Start a new submission
-                                        </button>
                                     </div>
 
                                     <div className="govuk-!-margin-top-6">
                                         <h2 className="govuk-heading-m">Conversation</h2>
                                         {askHistory.length === 0 ? (
                                             <p className="govuk-body">
-                                                No questions asked yet. Try asking something like "What is Jane Doe's passport number?".
+                                                No questions asked yet.
                                             </p>
                                         ) : (
                                             askHistory.map((entry, index) => (
@@ -678,8 +724,6 @@ export default function App() {
         </div>
     );
 }
-
-
 
 
 
