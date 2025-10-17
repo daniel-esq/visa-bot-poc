@@ -11,8 +11,8 @@
     {
       "key": "dob",
       "title": "Date of birth",
-      "hint": "Use the format YYYY-MM-DD.",
-      "placeholder": "1991-04-12",
+      "hint": "Use the format DD-MM-YY.",
+      "placeholder": "12-04-2002",
       "type": "date",
       "order": 5
     },

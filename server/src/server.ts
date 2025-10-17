@@ -123,8 +123,9 @@ app.post("/api/tts", async (req: Request, res: Response, next: NextFunction) => 
         const ttsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
         const speechResponse = await openai.audio.speech.create({
             model: ttsModel,
-            voice: voice && typeof voice === "string" ? voice : "alloy",
+            voice: voice && typeof voice === "string" ? voice : "nova",
             input: text,
+            instructions: "Speak in a cheerful tone with a strong British accent"
         });
 
         const audioBuffer = Buffer.from(await speechResponse.arrayBuffer());

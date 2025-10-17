@@ -96,7 +96,7 @@ export default function App() {
             case "full_name":
                 return value.trim() ? null : "Please enter your full name.";
             case "dob":
-                return /^\d{2}-\d{2}-\d{4}$/.test(value) ? null : "Use format DD-MM-YYYY.";
+                return null; ///^\d{2}-\d{2}-\d{4}$/.test(value) ? null : "Use format DD-MM-YYYY.";
             case "nationality":
                 return value.trim() ? null : "Please enter your nationality.";
             case "passport_number":
